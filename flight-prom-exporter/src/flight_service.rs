@@ -6,11 +6,10 @@ use arrow_flight::{
 use futures::{stream, Stream};
 use std::pin::Pin;
 use tonic::{Request, Response, Status, Streaming};
-use arrow_array::{StringArray,RecordBatch,ArrayRef};
-use prometheus_client::encoding::text::encode;
-use std::sync::Arc;
+use arrow_array::{RecordBatch};
 use arrow_flight::utils::batches_to_flight_data;
-mod prom_client;
+
+use crate::prom_client::PromClient;
 
 macro_rules! status {
     ($desc:expr, $err:expr) => {
@@ -18,11 +17,13 @@ macro_rules! status {
     };
 }
 
-#[derive(Clone)]
-pub struct FlightServiceImpl {}
+// #[derive(Clone)]
+pub struct PromClientFlightService {
+    pub prom_client: PromClient
+}
 
 #[tonic::async_trait]
-impl FlightService for FlightServiceImpl {
+impl FlightService for PromClientFlightService {
     type HandshakeStream = Pin<
         Box<dyn Stream<Item = Result<HandshakeResponse, Status>> + Send + Sync + 'static>,
     >;
@@ -77,7 +78,7 @@ impl FlightService for FlightServiceImpl {
         &self,
         _request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
-        let batch = get_metrics_batch().await;
+        let batch = self.prom_client.get_registry_as_arrow_batch().await;
         let stream = batch_to_stream(batch).await.unwrap();
         let resp = Response::new(stream);
         Ok(resp)
@@ -110,19 +111,6 @@ impl FlightService for FlightServiceImpl {
     ) -> Result<Response<Self::DoExchangeStream>, Status> {
         Err(Status::unimplemented("Implement do_exchange"))
     }
-}
-
-pub async fn get_metrics_batch() -> RecordBatch {
-    let registry = get_registry();
-    let mut string_ourput = String::new();
-    encode(&mut string_ourput, &registry).unwrap();
-    let metrics: Vec<&str> = string_ourput.split("\n").collect();
-    let string_array = StringArray::from(metrics);
-    let metrics_ref: ArrayRef = Arc::new(string_array);
-    let record_batch = RecordBatch::try_from_iter(vec![
-      ("metrics_ref", metrics_ref),
-    ]).unwrap();
-    record_batch
 }
 
 pub async fn batch_to_stream(batch: RecordBatch) -> Result<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send + Sync>>, Status> {
