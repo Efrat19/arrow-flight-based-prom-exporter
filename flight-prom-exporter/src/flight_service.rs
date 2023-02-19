@@ -6,12 +6,11 @@ use arrow_flight::{
 use futures::{stream, Stream};
 use std::pin::Pin;
 use tonic::{Request, Response, Status, Streaming};
-use prometheus_client::registry::Registry;
-use prometheus_client::metrics::counter::{Counter};
 use arrow_array::{StringArray,RecordBatch,ArrayRef};
 use prometheus_client::encoding::text::encode;
 use std::sync::Arc;
 use arrow_flight::utils::batches_to_flight_data;
+mod prom_client;
 
 macro_rules! status {
     ($desc:expr, $err:expr) => {
@@ -79,15 +78,7 @@ impl FlightService for FlightServiceImpl {
         _request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
         let batch = get_metrics_batch().await;
-        let schema = (*batch.schema()).clone();
-        let batches = vec![batch];
-
-        let flight_data = batches_to_flight_data(schema, batches)
-            .map_err(|e| status!("Could not convert batches", e))?
-            .into_iter()
-            .map(Ok);
-        let stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send + Sync>> =
-            Box::pin(stream::iter(flight_data));
+        let stream = batch_to_stream(batch).await.unwrap();
         let resp = Response::new(stream);
         Ok(resp)
     }
@@ -122,14 +113,7 @@ impl FlightService for FlightServiceImpl {
 }
 
 pub async fn get_metrics_batch() -> RecordBatch {
-    let mut registry = Registry::default();
-    let counter: Counter = Counter::default();
-    registry.register(
-        "my_counter",
-        "This is my counter",
-        counter.clone(),
-      );
-      counter.inc();
+    let registry = get_registry();
     let mut string_ourput = String::new();
     encode(&mut string_ourput, &registry).unwrap();
     let metrics: Vec<&str> = string_ourput.split("\n").collect();
@@ -139,4 +123,16 @@ pub async fn get_metrics_batch() -> RecordBatch {
       ("metrics_ref", metrics_ref),
     ]).unwrap();
     record_batch
-    }
+}
+
+pub async fn batch_to_stream(batch: RecordBatch) -> Result<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send + Sync>>, Status> {
+    let schema = (*batch.schema()).clone();
+    let batches = vec![batch];
+    let flight_data = batches_to_flight_data(schema, batches)
+        .map_err(|e| status!("Could not convert batches", e))?
+        .into_iter()
+        .map(Ok);
+    let stream: Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send + Sync>> =
+        Box::pin(stream::iter(flight_data));
+        Ok(stream)
+}
