@@ -15,3 +15,8 @@ cargo run --bin flight-prom-exporter --manifest-path flight-prom-exporter/Cargo.
 # View results on the #2 terminal window:
 cargo run --bin flight-client --manifest-path flight-client/Cargo.toml
 ```
+
+## Helpful sources
+- [prometheus rust client](https://github.com/prometheus/client_rust)
+- [flight rust src](https://github.com/apache/arrow-rs/tree/master/arrow-flight)
+- [some example](https://github.com/apache/arrow/pull/6308/files)
